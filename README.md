@@ -1,82 +1,114 @@
-# NBA Data Preprocessing
+# NBA Data Preprocessing — Research-Grade, Hardware-Aware Real-Time Pipeline
 
-> Comprehensive data analysis and preprocessing pipeline for NBA basketball statistics
+This repository now supports both the original preprocessing contract and a modular, deployment-oriented ML data pipeline suitable for AI + hardware research workflows.
 
-## 📊 Overview
+## What’s New
 
-This project focuses on NBA basketball data collection, cleaning, and preprocessing. It provides a complete workflow for transforming raw NBA statistics into analysis-ready datasets.
+- Modular architecture with reusable components:
+  - `pipeline/ingestion/`
+  - `pipeline/preprocessing/`
+  - `pipeline/feature_engineering/`
+  - `pipeline/validation/`
+  - `pipeline/streaming/`
+  - `pipeline/config.py`
+- Deterministic preprocessing (seeded, stable ordering, reproducible artifacts).
+- Batch + simulated streaming execution with incremental chunk processing.
+- Hardware-aware adaptation of chunk/batch sizes under memory/compute constraints.
+- Latency, throughput, memory, and energy estimation artifacts.
+- Data-quality checks: missingness, outlier rate, lightweight drift score.
+- Benchmarking rigor: multiple runs, mean/std/95% CI summaries.
+- Constraint experiment across chunk size, memory, and compute budgets with downstream model impact analysis.
+- Dataset fingerprinting (SHA256 over canonical CSV serialization).
+- CLI entrypoint for repeatable experiments.
 
-### Key Features
+## System Architecture
 
-- **Data Extraction**: Extract NBA statistics from multiple sources
-- **Data Cleaning**: Handle missing values, outliers, and inconsistencies
-- **Feature Engineering**: Create meaningful statistical features
-- **Data Visualization**: Generate insightful charts and graphs
-- **Reproducible Pipeline**: Fully documented data processing workflow
-
-## 🏀 Dataset Information
-
-- **Source**: NBA official statistics and game records
-- **Scope**: Historical player and team performance metrics
-- **Features**: Points, assists, rebounds, field goal percentages, and more
-- **Time Period**: Configurable historical data range
-
-## 🏗️ Project Structure
-
+```mermaid
+flowchart LR
+    A[Raw Dataset] --> B[Ingestion + Fingerprinting]
+    B --> C[Preprocessing\nmissing values/outliers]
+    C --> D[Feature Engineering\nrolling/temporal/anomaly]
+    D --> E[Validation\nquality + drift]
+    D --> F[Batch Runner]
+    D --> G[Streaming Runner]
+    F --> H[Benchmark + Model Metrics]
+    G --> H
+    H --> I[Artifacts\nJSON + CSV reports]
 ```
-.
-├── NBA Data Preprocess/   # Core preprocessing scripts
-├── _idea/                 # Project planning and design
-├── course-info.yaml       # Project metadata
-├── requirements.txt       # Python dependencies
-└── course-remote-info..   # Remote configuration files
-```
 
-## 📋 Data Processing Steps
+## Backward Compatibility
 
-1. **Extract**: Fetch NBA data from official sources
-2. **Clean**: Remove duplicates and handle missing values
-3. **Transform**: Create derived features and aggregations
-4. **Validate**: Ensure data quality and consistency
-5. **Export**: Save processed data in standard formats
+The existing `preprocess.py` API remains available (`clean_data`, `feature_data`, `multicol_data`, `transform_data`) so prior functionality is preserved.
 
-## 🚀 Quick Start
+## CLI Usage
+
+Run from `NBA Data Preprocessing/task`:
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run preprocessing pipeline
-python preprocess.py --input raw_data.csv --output clean_data.csv
-
-# Generate analysis reports
-python generate_report.py clean_data.csv
+python run_pipeline.py \
+  --input ../data/nba2k-full.csv \
+  --output-dir artifacts \
+  --chunk-size 128 \
+  --batch-size 256 \
+  --max-memory-mb 512 \
+  --max-compute-units 0.5 \
+  --benchmark-runs 5
 ```
 
-## 🔧 Technologies
+## Generated Artifacts
 
-- **Python 3.8+**
-- **Pandas** - Data manipulation and analysis
-- **NumPy** - Numerical computations
-- **Matplotlib/Seaborn** - Data visualization
-- **Scikit-learn** - Machine learning preprocessing utilities
+- `artifacts/reports/pipeline_report.json`
+- `artifacts/benchmarks/streaming_chunks.csv`
+- `artifacts/benchmarks/latency_vs_data_size.csv`
+- `artifacts/benchmarks/throughput_vs_memory.csv`
+- `artifacts/benchmarks/resource_vs_accuracy.csv`
+- `artifacts/benchmarks/constraint_experiment.csv`
+- `artifacts/benchmarks/latency_vs_accuracy.png`
+- `artifacts/benchmarks/memory_vs_accuracy.png`
+- `artifacts/reports/constraint_experiment_log.jsonl`
 
-## 📈 Use Cases
+These support:
+- latency vs data size curves,
+- throughput vs memory curves,
+- resource vs model performance trade-off analysis,
+- batch vs streaming energy/efficiency comparison.
 
-- Player performance analysis
-- Team statistics benchmarking
-- Trend analysis across seasons
-- Predictive modeling preparation
-- Statistical report generation
 
-## 📝 License
+## Constraint Experiment (Latency/Resource vs Model Performance)
 
-MIT License - See LICENSE file for details
+The pipeline automatically runs a reproducible experiment over:
+- varying chunk sizes,
+- memory limits,
+- compute constraints.
 
-## 🤝 Contributing
+For each configuration, it logs:
+- preprocessing latency,
+- training time (linear regression),
+- model accuracy (R²) and RMSE,
+- peak memory footprint.
 
-Contributions welcome! Please submit issues and pull requests.
+This directly supports analysis of **latency vs accuracy** and **memory vs accuracy** trade-offs for hardware-aware ML systems.
 
-## 📞 Support
+## Research Reproducibility Workflow
 
-For questions, open an issue in the repository.
+1. Record dataset fingerprint from report.
+2. Fix config and random seed in `PipelineConfig`.
+3. Run multiple benchmarks (`benchmark_runs`).
+4. Report mean/std/CI95 for latency/throughput.
+5. Archive generated artifacts and commit hash.
+
+## Edge / Embedded AI Relevance
+
+The hardware-aware mode mimics constrained deployment by scaling chunk and batch sizes based on available memory and compute budget. This makes the same preprocessing pipeline useful for server-class and edge-class experiments.
+
+## Testing
+
+Run from `NBA Data Preprocessing/task`:
+
+```bash
+python -m unittest discover -s test -p 'test_*.py'
+```
+
+## License
+
+MIT License.
