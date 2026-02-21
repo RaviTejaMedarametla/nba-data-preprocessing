@@ -1,10 +1,33 @@
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
 
+@dataclass
+class RollingState:
+    rolling_window: int
+    salary_window: deque[float]
+
+
 class FeatureEngineer:
+    def init_rolling_state(self, rolling_window: int = 5) -> RollingState:
+        return RollingState(rolling_window=rolling_window, salary_window=deque(maxlen=rolling_window))
+
+    def _add_streaming_rolling_features(self, featured: pd.DataFrame, state: RollingState) -> pd.DataFrame:
+        means, stds = [], []
+        for salary in featured['salary'].astype(float):
+            state.salary_window.append(float(salary))
+            vals = np.array(state.salary_window, dtype=float)
+            means.append(float(vals.mean()))
+            stds.append(float(vals.std(ddof=0)) if len(vals) > 1 else 0.0)
+        featured['salary_roll_mean'] = means
+        featured['salary_roll_std'] = stds
+        return featured
+
     def build_features(self, df: pd.DataFrame, rolling_window: int = 5) -> pd.DataFrame:
         featured = df.copy()
 
@@ -26,6 +49,27 @@ class FeatureEngineer:
         z = (featured['salary'] - featured['salary'].mean()) / featured['salary'].std(ddof=0)
         featured['salary_anomaly'] = (z.abs() > 2.5).astype(int)
 
+        return featured
+
+    def build_features_streaming(self, df: pd.DataFrame, state: RollingState) -> pd.DataFrame:
+        featured = df.copy()
+        year = featured['version'].astype(str).str.extract(r'(\d+)$')[0].astype(int)
+        year = np.where(year < 100, year + 2000, year)
+
+        featured['version_year'] = year
+        featured['age'] = featured['version_year'] - featured['b_day'].dt.year
+        featured['experience'] = featured['version_year'] - featured['draft_year'].dt.year
+        featured['bmi'] = featured['weight'] / (featured['height'] ** 2)
+
+        featured = featured.sort_values('version_year').reset_index(drop=True)
+        featured = self._add_streaming_rolling_features(featured, state)
+
+        featured['birth_month'] = featured['b_day'].dt.month
+        featured['draft_decade'] = (featured['draft_year'].dt.year // 10) * 10
+        salary = featured['salary'].astype(float)
+        denom = salary.std(ddof=0)
+        z = (salary - salary.mean()) / (denom if denom else 1.0)
+        featured['salary_anomaly'] = (z.abs() > 2.5).astype(int)
         return featured
 
     def drop_multicollinearity(self, df: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:

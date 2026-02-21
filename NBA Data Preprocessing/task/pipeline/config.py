@@ -15,6 +15,9 @@ class PipelineConfig:
     max_memory_mb: int = 1024
     max_compute_units: float = 1.0
     benchmark_runs: int = 5
+    adaptive_chunk_resize: bool = True
+    max_chunk_retries: int = 3
+    spill_to_disk: bool = False
     output_dir: Path = field(default_factory=lambda: Path('artifacts'))
 
     def ensure_output_dirs(self) -> None:
