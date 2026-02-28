@@ -1,0 +1,19 @@
+flowchart TD
+    SRC[CSV / Event Source] --> ING[Ingestion + Fingerprint]
+    ING --> PREP[Incremental Cleaning]
+    PREP --> FE[Streaming Feature Engineering]
+    FE --> VAL[Validation + Drift Monitoring]
+    FE --> ONLINE[Online Learner partial_fit]
+    VAL --> STORE[Benchmark + Quality Reports]
+    ONLINE --> STORE
+
+    subgraph RUNTIME[Resource-Aware Runtime]
+      MON[CPU / Memory / Energy Telemetry]
+      CTRL[Adaptive Chunk & Batch Controller]
+      SPILL[Optional Disk Spill]
+    end
+
+    MON --> CTRL
+    CTRL --> FE
+    CTRL --> ONLINE
+    CTRL --> SPILL

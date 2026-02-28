@@ -1,97 +1,141 @@
-# NBA Data Preprocessing — Research-Grade, Hardware-Aware Real-Time Pipeline
+# Streaming and Real-Time Feature Engineering for Resource-Constrained ML Systems
 
-This repository supports the original preprocessing contract and a modular, deployment-oriented ML data pipeline for AI + hardware research.
+This project delivers a modular data engineering system centered on **incremental processing, online learning, and hardware-aware execution**. It transforms NBA player data into production-grade ML features with both batch and streaming runtimes, while explicitly modeling edge and constrained deployment conditions.
 
-## What’s New (PASS-Level Upgrade)
+## Project Focus
 
-- True incremental streaming path with chunk-level processing and no full feature concatenation in streaming mode.
-- Adaptive chunk resizing under hard memory budget pressure, with retry + backpressure behavior.
-- Optional disk spill mode for out-of-core workflows (`--spill-to-disk`).
-- Online learning example in streaming mode using `SGDRegressor.partial_fit`.
-- Hardware telemetry integration (CPU usage, process/system memory, optional Intel RAPL energy if available).
-- Statistical rigor upgrades:
-  - bootstrap confidence intervals,
-  - permutation significance tests for batch vs streaming latency/throughput.
-- Advanced data quality reports:
-  - schema validation,
-  - feature-wise numeric/categorical drift,
-  - temporal drift analysis.
-- Parallel constraint-experiment execution via `n_jobs`.
-- Deterministic reproducibility controls (`random_seed`) and deterministic regression tests.
-- CI workflow for tests, deterministic report checks, and artifact schema validation.
+- **Streaming ML pipelines:** chunked ingestion, incremental preprocessing, and per-chunk telemetry.
+- **Online learning:** streaming mode supports iterative model updates with `partial_fit`.
+- **Real-time analytics:** captures latency, throughput, memory pressure, and energy estimates.
+- **Edge deployment relevance:** adaptive control logic responds to memory/compute limits.
 
-## System Architecture
+## Architecture Diagram
 
 ```mermaid
-flowchart LR
-    A[Raw Dataset] --> B[Ingestion + Fingerprinting]
-    B --> C[Preprocessing\nmissing values/outliers]
-    C --> D[Feature Engineering\nrolling/temporal/anomaly]
-    D --> E[Validation\nquality + drift + schema]
-    D --> F[Batch Runner]
-    D --> G[Streaming Runner\nadaptive chunks + online fit]
-    F --> H[Benchmark + Statistical Tests]
-    G --> H
-    H --> I[Artifacts\nJSON + CSV + PNG + JSONL]
+flowchart TD
+    SRC[CSV / Event Source] --> ING[Ingestion + Fingerprint]
+    ING --> PREP[Incremental Cleaning]
+    PREP --> FE[Streaming Feature Engineering]
+    FE --> VAL[Validation + Drift Monitoring]
+    FE --> ONLINE[Online Learner partial_fit]
+    VAL --> STORE[Reports + Benchmarks + Artifacts]
+    ONLINE --> STORE
+
+    subgraph RUNTIME[Resource-Aware Runtime]
+      MON[CPU / Memory / Energy Telemetry]
+      CTRL[Adaptive Chunk & Batch Controller]
+      SPILL[Optional Disk Spill]
+    end
+
+    MON --> CTRL
+    CTRL --> FE
+    CTRL --> ONLINE
+    CTRL --> SPILL
 ```
 
-## Backward Compatibility
+> Source diagram file: `docs/architecture.mmd`.
 
-The existing `preprocess.py` API remains available (`clean_data`, `feature_data`, `multicol_data`, `transform_data`).
+## Streaming Workflow
 
-## CLI Usage
+1. Ingest source and compute deterministic fingerprint.
+2. Set starting chunk/batch sizes from memory and compute constraints.
+3. Clean and feature-engineer each chunk incrementally.
+4. Validate schema and quality, and collect telemetry snapshots.
+5. Trigger adaptive resizing or retry if memory budget is exceeded.
+6. Continue online training via per-chunk `partial_fit`.
+7. Write chunk-level logs plus summary reports and benchmark datasets.
 
-Run from `NBA Data Preprocessing/task`:
+Detailed workflow notes: `docs/streaming_workflow.md`.
+
+## Resource-Aware Pipeline Design
+
+The runtime combines telemetry and control:
+
+- **Memory-aware scaling** bounds chunk and batch sizes as budgets tighten.
+- **Compute-aware scaling** modulates processing intensity for lower-power systems.
+- **Adaptive retries** recover from chunk-level memory overages.
+- **Disk spill mode** preserves progress under strict RAM ceilings.
+- **Energy-aware reporting** includes optional RAPL energy when available, with fallback estimates.
+
+## Configuration Templates
+
+Prebuilt templates are provided for common deployment profiles:
+
+- `configs/pipeline.edge.template.json`
+- `configs/pipeline.server.template.json`
+
+Run with a template:
 
 ```bash
+cd "NBA Data Preprocessing/task"
 python run_pipeline.py \
   --input ../data/nba2k-full.csv \
-  --output-dir artifacts \
+  --config-template ../../configs/pipeline.edge.template.json
+```
+
+> CLI values still apply and can be used to override template-backed runs.
+
+## Reproducibility
+
+- Set `random_seed` in configuration for deterministic fingerprints and benchmark reproducibility.
+- Use fixed benchmark runs (`benchmark_runs`) when comparing hardware profiles.
+- Store output artifacts per profile (`output_dir`) to preserve traceable experiment history.
+
+Recommended reproducibility check:
+
+```bash
+cd "NBA Data Preprocessing/task"
+python -m unittest discover -s test -p 'test_*.py'
+```
+
+## Benchmarking Guide
+
+Example benchmark run:
+
+```bash
+cd "NBA Data Preprocessing/task"
+python run_pipeline.py \
+  --input ../data/nba2k-full.csv \
+  --output-dir artifacts_benchmark \
   --chunk-size 128 \
   --batch-size 256 \
   --max-memory-mb 512 \
   --max-compute-units 0.5 \
   --benchmark-runs 5 \
   --n-jobs 2 \
-  --random-seed 42 \
   --spill-to-disk
 ```
 
-## Generated Artifacts
+Key outputs:
 
-- `artifacts/reports/pipeline_report.json`
-- `artifacts/reports/streaming_chunks.jsonl`
-- `artifacts/reports/constraint_experiment_log.jsonl`
-- `artifacts/benchmarks/streaming_chunks.csv`
-- `artifacts/benchmarks/significance_tests.csv`
-- `artifacts/benchmarks/latency_vs_data_size.csv`
-- `artifacts/benchmarks/throughput_vs_memory.csv`
-- `artifacts/benchmarks/resource_vs_accuracy.csv`
-- `artifacts/benchmarks/constraint_experiment.csv`
-- `artifacts/benchmarks/latency_vs_accuracy.png`
-- `artifacts/benchmarks/memory_vs_accuracy.png`
-- `artifacts/benchmarks/latency_memory_accuracy.png`
+- `reports/pipeline_report.json`
+- `reports/streaming_chunks.jsonl`
+- `benchmarks/constraint_experiment.csv`
+- `benchmarks/significance_tests.csv`
+- `benchmarks/latency_vs_accuracy.png`
 
-These support edge-AI and telemetry-oriented narratives:
-- streaming vs batch trade-offs,
-- latency/memory/accuracy frontiers,
-- constrained deployment analysis aligned with semiconductor/embedded systems contexts.
+## Design Trade-Offs
 
-## Testing
+- **Throughput vs. memory safety:** smaller chunks reduce memory peaks but increase orchestration overhead.
+- **Latency vs. model fidelity:** aggressive constraint settings can reduce processing quality or online fit stability.
+- **Disk spill vs. end-to-end delay:** spill mode protects continuity but introduces I/O latency.
+- **Parallelism vs. determinism surface area:** more workers improve speed but expand runtime variability risks.
 
-Run from `NBA Data Preprocessing/task`:
+## Scaling Discussion
 
-```bash
-python -m unittest discover -s test -p 'test_*.py'
-```
+- **Vertical scaling:** increase `max_memory_mb`, `max_compute_units`, and `batch_size` for stronger hosts.
+- **Constraint sweeps:** the built-in experiment runner explores chunk/memory/compute combinations and summarizes best operating points.
+- **Parallel experiment execution:** `n_jobs > 1` accelerates constraint-space exploration.
+- **Data-volume scaling:** benchmark exports include latency-vs-size and throughput-vs-memory curves to guide capacity planning.
 
-## CI
+## Hardware Relevance
 
-GitHub Actions workflow validates:
-- unit tests,
-- deterministic fingerprint consistency,
-- report schema/required fields,
-- streaming and benchmark artifacts.
+This system is suitable for **resource-constrained and edge-aware ML data engineering** scenarios:
+
+- Embedded and low-memory inference gateways.
+- On-device feature pipelines preceding online model updates.
+- Telemetry-informed tuning loops for CPU/memory/energy budgets.
+- Comparative evaluation between edge-like and server-like configuration templates.
 
 ## License
 

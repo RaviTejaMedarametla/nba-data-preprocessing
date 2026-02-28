@@ -1,0 +1,13 @@
+{
+  "random_seed": 42,
+  "chunk_size": 64,
+  "batch_size": 96,
+  "n_jobs": 1,
+  "max_memory_mb": 256,
+  "max_compute_units": 0.4,
+  "benchmark_runs": 3,
+  "adaptive_chunk_resize": true,
+  "max_chunk_retries": 3,
+  "spill_to_disk": true,
+  "output_dir": "artifacts_edge"
+}

@@ -1,3 +1,3 @@
-from .engine import PipelineRunner
+from .engine import PipelineRunner, RealTimePipelineRunner
 
-__all__ = ['PipelineRunner']
+__all__ = ['PipelineRunner', 'RealTimePipelineRunner']
