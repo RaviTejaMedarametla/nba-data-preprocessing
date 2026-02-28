@@ -27,7 +27,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
-class PipelineRunner:
+class RealTimePipelineRunner:
     def __init__(self, config: PipelineConfig):
         self.config = config
         set_global_seed(config.random_seed)
@@ -467,3 +467,7 @@ class PipelineRunner:
         plt.tight_layout()
         plt.savefig(benchmark_dir / 'latency_memory_accuracy.png', dpi=160)
         plt.close()
+
+
+# Backward-compatible alias
+PipelineRunner = RealTimePipelineRunner
