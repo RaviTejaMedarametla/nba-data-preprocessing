@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Runtime artifacts
+artifacts/
+artifacts_*/
+NBA Data Preprocessing/task/artifacts/
+NBA Data Preprocessing/task/artifacts_*/
+
+# OS/editor noise
+.DS_Store
+*.swp

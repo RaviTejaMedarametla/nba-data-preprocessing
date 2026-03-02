@@ -9,22 +9,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Cache pip wheels
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install psutil joblib
+          pip install --requirement requirements.txt
+
       - name: Run unit tests
         working-directory: NBA Data Preprocessing/task
         run: python -m unittest discover -s test -p 'test_*.py'
+
       - name: Generate deterministic artifacts
         working-directory: NBA Data Preprocessing/task
         run: |
           python run_pipeline.py --input ../data/nba2k-full.csv --output-dir artifacts_ci --benchmark-runs 2 --random-seed 42 --spill-to-disk
           python run_pipeline.py --input ../data/nba2k-full.csv --output-dir artifacts_ci_2 --benchmark-runs 2 --random-seed 42 --spill-to-disk
+
       - name: Validate artifact schema and deterministic fingerprint
         working-directory: NBA Data Preprocessing/task
         run: |
@@ -34,9 +48,19 @@ jobs:
 
           r1 = json.loads(Path('artifacts_ci/reports/pipeline_report.json').read_text())
           r2 = json.loads(Path('artifacts_ci_2/reports/pipeline_report.json').read_text())
-          required_top = {'dataset_fingerprint','batch','streaming','benchmark','constraint_experiment','quality','scaling'}
+          required_top = {
+              'dataset_fingerprint',
+              'reproducibility',
+              'batch',
+              'streaming',
+              'benchmark',
+              'constraint_experiment',
+              'quality',
+              'scaling',
+          }
           assert required_top.issubset(r1.keys())
           assert r1['dataset_fingerprint']['sha256'] == r2['dataset_fingerprint']['sha256']
+          assert r1['reproducibility']['random_seed'] == 42
           assert 'significance' in r1['benchmark']
           assert 'chunk_metrics' in r1['streaming']
           assert 'schema_ok' in r1['quality']

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import platform
+import sys
 import time
 import tracemalloc
 from dataclasses import asdict
@@ -79,17 +81,52 @@ class RealTimePipelineRunner:
         filtered = self.engineer.drop_multicollinearity(featured)
         return self.engineer.encode_and_scale(filtered)
 
+    def _profile_stream_chunk(self, chunk: pd.DataFrame, rolling_state: Any) -> tuple[pd.DataFrame, pd.Series, dict[str, float]]:
+        stage_start = time.perf_counter()
+        cleaned = self.preprocessor.clean(chunk)
+        preprocess_s = time.perf_counter() - stage_start
+
+        stage_start = time.perf_counter()
+        featured = self.engineer.build_features_streaming(cleaned, rolling_state)
+        feature_s = time.perf_counter() - stage_start
+
+        stage_start = time.perf_counter()
+        filtered = self.engineer.drop_multicollinearity(featured)
+        select_s = time.perf_counter() - stage_start
+
+        stage_start = time.perf_counter()
+        x_chunk, y_chunk = self.engineer.encode_and_scale(filtered)
+        encode_s = time.perf_counter() - stage_start
+
+        return x_chunk, y_chunk, {
+            'preprocess_s': float(preprocess_s),
+            'feature_engineering_s': float(feature_s),
+            'feature_selection_s': float(select_s),
+            'encode_scale_s': float(encode_s),
+        }
+
     def _bootstrap_ci(self, arr: np.ndarray, n_bootstrap: int = 400) -> dict[str, float]:
         if len(arr) == 0:
-            return {'mean': 0.0, 'std': 0.0, 'ci95_low': 0.0, 'ci95_high': 0.0}
+            return {
+                'sample_size': 0,
+                'mean': 0.0,
+                'std': 0.0,
+                'median': 0.0,
+                'p95': 0.0,
+                'ci95_low': 0.0,
+                'ci95_high': 0.0,
+            }
         rng = np.random.default_rng(self.config.random_seed)
         means = []
         for _ in range(n_bootstrap):
             sample = rng.choice(arr, size=len(arr), replace=True)
             means.append(float(sample.mean()))
         return {
+            'sample_size': int(len(arr)),
             'mean': float(arr.mean()),
             'std': float(arr.std(ddof=0)),
+            'median': float(np.median(arr)),
+            'p95': float(np.percentile(arr, 95)),
             'ci95_low': float(np.percentile(means, 2.5)),
             'ci95_high': float(np.percentile(means, 97.5)),
         }
@@ -108,6 +145,29 @@ class RealTimePipelineRunner:
             if abs(float(a_perm.mean() - b_perm.mean())) >= observed:
                 count += 1
         return float((count + 1) / (n_perm + 1))
+
+    def _reproducibility_manifest(self) -> dict[str, Any]:
+        return {
+            'random_seed': self.config.random_seed,
+            'python_version': sys.version.split()[0],
+            'platform': platform.platform(),
+            'config': {
+                'chunk_size': self.config.chunk_size,
+                'batch_size': self.config.batch_size,
+                'max_memory_mb': self.config.max_memory_mb,
+                'max_compute_units': self.config.max_compute_units,
+                'benchmark_runs': self.config.benchmark_runs,
+                'n_jobs': self.config.n_jobs,
+                'adaptive_chunk_resize': self.config.adaptive_chunk_resize,
+                'max_chunk_retries': self.config.max_chunk_retries,
+                'spill_to_disk': self.config.spill_to_disk,
+            },
+            'dependencies': {
+                'numpy': np.__version__,
+                'pandas': pd.__version__,
+                'matplotlib': matplotlib.__version__,
+            },
+        }
 
     def run_batch(self, source: str | Path | pd.DataFrame) -> dict:
         df = self.ingestor.load(source)
@@ -172,7 +232,7 @@ class RealTimePipelineRunner:
                     chunk_id += 1
                     mem_before = self.hardware.process_memory_mb()
                     t0 = time.perf_counter()
-                    X_chunk, y_chunk = self._process_stream_chunk(chunk, rolling_state)
+                    X_chunk, y_chunk, operator_profile = self._profile_stream_chunk(chunk, rolling_state)
                     if online_feature_cols is None:
                         online_feature_cols = list(X_chunk.columns)
                     else:
@@ -218,6 +278,9 @@ class RealTimePipelineRunner:
                             'memory_exceeded': memory_exceeded,
                             'retries': retries,
                             'spill_paths': spill_paths,
+                            'operator_profile_s': operator_profile,
+                            'input_bytes': int(chunk.memory_usage(index=True, deep=True).sum()),
+                            'estimated_input_bandwidth_mb_s': float((chunk.memory_usage(index=True, deep=True).sum() / (1024 * 1024)) / max(elapsed, 1e-9)),
                         }
                     )
                     break
@@ -244,6 +307,12 @@ class RealTimePipelineRunner:
             'energy_estimate_j': telemetry['rapl_energy_j'] if telemetry['rapl_energy_j'] is not None else telemetry['fallback_energy_estimate_j'],
             'telemetry': telemetry,
             'chunk_metrics': chunk_metrics,
+            'operator_profile_summary_s': {
+                'preprocess_s': float(np.mean([m['operator_profile_s']['preprocess_s'] for m in chunk_metrics])) if chunk_metrics else 0.0,
+                'feature_engineering_s': float(np.mean([m['operator_profile_s']['feature_engineering_s'] for m in chunk_metrics])) if chunk_metrics else 0.0,
+                'feature_selection_s': float(np.mean([m['operator_profile_s']['feature_selection_s'] for m in chunk_metrics])) if chunk_metrics else 0.0,
+                'encode_scale_s': float(np.mean([m['operator_profile_s']['encode_scale_s'] for m in chunk_metrics])) if chunk_metrics else 0.0,
+            },
             'model': {
                 'rmse': 0.0,
                 'r2': online_r2,
@@ -281,6 +350,8 @@ class RealTimePipelineRunner:
             'significance': {
                 'latency_pvalue': self._permutation_pvalue(batch_latencies, stream_latencies),
                 'throughput_pvalue': self._permutation_pvalue(batch_tp, stream_tp),
+                'latency_mean_delta_s': float(stream_latencies.mean() - batch_latencies.mean()),
+                'throughput_mean_delta_rows_s': float(stream_tp.mean() - batch_tp.mean()),
             },
             'latency_vs_data_size': latency_vs_size,
             'throughput_vs_memory': throughput_vs_memory,
@@ -361,6 +432,7 @@ class RealTimePipelineRunner:
 
         report = {
             'dataset_fingerprint': asdict(fp),
+            'reproducibility': self._reproducibility_manifest(),
             'batch': batch_report,
             'streaming': streaming_report,
             'benchmark': benchmark,
@@ -403,7 +475,21 @@ class RealTimePipelineRunner:
         with (out / 'reports' / 'pipeline_report.json').open('w', encoding='utf-8') as f:
             json.dump(report, f, indent=2)
 
+        with (out / 'metadata' / 'run_manifest.json').open('w', encoding='utf-8') as f:
+            json.dump(report['reproducibility'], f, indent=2)
+
         pd.DataFrame(report['streaming']['chunk_metrics']).to_csv(out / 'benchmarks' / 'streaming_chunks.csv', index=False)
+        pd.DataFrame(
+            [
+                {
+                    'chunk_id': row['chunk_id'],
+                    **row['operator_profile_s'],
+                    'estimated_input_bandwidth_mb_s': row['estimated_input_bandwidth_mb_s'],
+                    'input_bytes': row['input_bytes'],
+                }
+                for row in report['streaming']['chunk_metrics']
+            ]
+        ).to_csv(out / 'profiles' / 'operator_profile.csv', index=False)
         with (out / 'reports' / 'streaming_chunks.jsonl').open('w', encoding='utf-8') as f:
             for row in report['streaming']['chunk_metrics']:
                 f.write(json.dumps(row) + '\n')
