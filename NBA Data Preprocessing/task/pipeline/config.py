@@ -6,7 +6,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Centralized configuration for deterministic, research-grade runs."""
+    """Centralized configuration for deterministic pipeline runs."""
 
     random_seed: int = 42
     chunk_size: int = 128
@@ -22,6 +22,5 @@ class PipelineConfig:
 
     def ensure_output_dirs(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.output_dir / 'intermediate').mkdir(parents=True, exist_ok=True)
-        (self.output_dir / 'reports').mkdir(parents=True, exist_ok=True)
-        (self.output_dir / 'benchmarks').mkdir(parents=True, exist_ok=True)
+        for dirname in ('intermediate', 'reports', 'benchmarks', 'metadata', 'profiles'):
+            (self.output_dir / dirname).mkdir(parents=True, exist_ok=True)
