@@ -1,8 +1,7 @@
-https://github.com/hyperskill/hs-test-python/archive/release.tar.gz
-pandas
-numpy
-requests
-scikit-learn
-matplotlib
-psutil
-joblib
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.5.1
+matplotlib==3.9.2
+psutil==6.0.0
+joblib==1.4.2
+requests==2.32.3
