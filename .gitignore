@@ -2,15 +2,24 @@
 __pycache__/
 *.py[cod]
 
+# Notebook and interpreter artifacts
+.ipynb_checkpoints/
+*.log
+
 # Virtual environments
 .venv/
 venv/
+
+# Editor/IDE settings
+.idea/
+.vscode/
 
 # Runtime artifacts
 artifacts/
 artifacts_*/
 NBA Data Preprocessing/task/artifacts/
 NBA Data Preprocessing/task/artifacts_*/
+outputs/
 
 # OS/editor noise
 .DS_Store
