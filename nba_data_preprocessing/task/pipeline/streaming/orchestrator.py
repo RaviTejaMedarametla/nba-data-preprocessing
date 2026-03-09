@@ -10,12 +10,14 @@ from math import sqrt
 from pathlib import Path
 from typing import Any, Iterator
 
-import matplotlib
+try:
+    import matplotlib
+except Exception:  # optional plotting dependency
+    matplotlib = None
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
-from sklearn.linear_model import LinearRegression, SGDRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.linear_model import SGDRegressor
 
 from pipeline.config import PipelineConfig
 from pipeline.feature_engineering import FeatureEngineer
@@ -24,9 +26,9 @@ from pipeline.ingestion import DataIngestor
 from pipeline.preprocessing import Preprocessor
 from pipeline.reproducibility import set_global_seed
 from pipeline.validation import DataValidator
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+from pipeline.streaming.evaluation import evaluate_model
+from pipeline.streaming.reporting import write_artifacts
+from pipeline.streaming.statistics import bootstrap_ci, permutation_pvalue
 
 
 class RealTimePipelineRunner:
@@ -106,45 +108,10 @@ class RealTimePipelineRunner:
         }
 
     def _bootstrap_ci(self, arr: np.ndarray, n_bootstrap: int = 400) -> dict[str, float]:
-        if len(arr) == 0:
-            return {
-                'sample_size': 0,
-                'mean': 0.0,
-                'std': 0.0,
-                'median': 0.0,
-                'p95': 0.0,
-                'ci95_low': 0.0,
-                'ci95_high': 0.0,
-            }
-        rng = np.random.default_rng(self.config.random_seed)
-        means = []
-        for _ in range(n_bootstrap):
-            sample = rng.choice(arr, size=len(arr), replace=True)
-            means.append(float(sample.mean()))
-        return {
-            'sample_size': int(len(arr)),
-            'mean': float(arr.mean()),
-            'std': float(arr.std(ddof=0)),
-            'median': float(np.median(arr)),
-            'p95': float(np.percentile(arr, 95)),
-            'ci95_low': float(np.percentile(means, 2.5)),
-            'ci95_high': float(np.percentile(means, 97.5)),
-        }
+        return bootstrap_ci(arr, random_seed=self.config.random_seed, n_bootstrap=n_bootstrap)
 
     def _permutation_pvalue(self, a: np.ndarray, b: np.ndarray, n_perm: int = 1000) -> float:
-        if len(a) == 0 or len(b) == 0:
-            return 1.0
-        rng = np.random.default_rng(self.config.random_seed)
-        observed = abs(float(a.mean() - b.mean()))
-        combined = np.concatenate([a, b])
-        count = 0
-        for _ in range(n_perm):
-            shuffled = rng.permutation(combined)
-            a_perm = shuffled[: len(a)]
-            b_perm = shuffled[len(a) :]
-            if abs(float(a_perm.mean() - b_perm.mean())) >= observed:
-                count += 1
-        return float((count + 1) / (n_perm + 1))
+        return permutation_pvalue(a, b, random_seed=self.config.random_seed, n_perm=n_perm)
 
     def _reproducibility_manifest(self) -> dict[str, Any]:
         return {
@@ -165,7 +132,7 @@ class RealTimePipelineRunner:
             'dependencies': {
                 'numpy': np.__version__,
                 'pandas': pd.__version__,
-                'matplotlib': matplotlib.__version__,
+                'matplotlib': matplotlib.__version__ if matplotlib is not None else None,
             },
         }
 
@@ -455,104 +422,11 @@ class RealTimePipelineRunner:
         return report
 
     def _evaluate_model(self, X: pd.DataFrame, y: pd.Series) -> dict:
-        X = X.fillna(0.0)
-        if len(X) < 5:
-            return {'rmse': 0.0, 'r2': 0.0, 'training_time_s': 0.0}
-        split = int(len(X) * 0.8)
-        x_train, x_test = X.iloc[:split], X.iloc[split:]
-        y_train, y_test = y.iloc[:split], y.iloc[split:]
-        model = LinearRegression()
-        train_start = time.perf_counter()
-        model.fit(x_train, y_train)
-        training_time = time.perf_counter() - train_start
-        pred = model.predict(x_test)
-        rmse = float(np.sqrt(mean_squared_error(y_test, pred)))
-        r2 = float(r2_score(y_test, pred))
-        return {'rmse': rmse, 'r2': r2, 'training_time_s': float(training_time)}
+        return evaluate_model(X, y)
 
     def _write_artifacts(self, report: dict) -> None:
-        out = self.config.output_dir
-        with (out / 'reports' / 'pipeline_report.json').open('w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2)
+        write_artifacts(self.config, report)
 
-        with (out / 'metadata' / 'run_manifest.json').open('w', encoding='utf-8') as f:
-            json.dump(report['reproducibility'], f, indent=2)
-
-        pd.DataFrame(report['streaming']['chunk_metrics']).to_csv(out / 'benchmarks' / 'streaming_chunks.csv', index=False)
-        pd.DataFrame(
-            [
-                {
-                    'chunk_id': row['chunk_id'],
-                    **row['operator_profile_s'],
-                    'estimated_input_bandwidth_mb_s': row['estimated_input_bandwidth_mb_s'],
-                    'input_bytes': row['input_bytes'],
-                }
-                for row in report['streaming']['chunk_metrics']
-            ]
-        ).to_csv(out / 'profiles' / 'operator_profile.csv', index=False)
-        with (out / 'reports' / 'streaming_chunks.jsonl').open('w', encoding='utf-8') as f:
-            for row in report['streaming']['chunk_metrics']:
-                f.write(json.dumps(row) + '\n')
-
-        pd.DataFrame(report['benchmark']['latency_vs_data_size']).to_csv(out / 'benchmarks' / 'latency_vs_data_size.csv', index=False)
-        pd.DataFrame(report['benchmark']['throughput_vs_memory']).to_csv(out / 'benchmarks' / 'throughput_vs_memory.csv', index=False)
-        pd.DataFrame(report['benchmark']['resource_vs_accuracy']).to_csv(out / 'benchmarks' / 'resource_vs_accuracy.csv', index=False)
-        pd.DataFrame([report['benchmark']['significance']]).to_csv(out / 'benchmarks' / 'significance_tests.csv', index=False)
-
-        experiment_df = pd.DataFrame(report['constraint_experiment']['records'])
-        experiment_df.to_csv(out / 'benchmarks' / 'constraint_experiment.csv', index=False)
-
-        with (out / 'reports' / 'constraint_experiment_log.jsonl').open('w', encoding='utf-8') as f:
-            for row in report['constraint_experiment']['records']:
-                f.write(json.dumps(row) + '\n')
-
-        self._plot_experiment_results(experiment_df, out / 'benchmarks')
-
-    def _plot_experiment_results(self, experiment_df: pd.DataFrame, benchmark_dir: Path) -> None:
-        plt.figure(figsize=(8, 5))
-        plt.scatter(
-            experiment_df['preprocessing_latency_s'],
-            experiment_df['model_accuracy_r2'],
-            c=experiment_df['compute_limit'],
-            cmap='viridis',
-        )
-        plt.colorbar(label='Compute constraint')
-        plt.xlabel('Preprocessing latency (s)')
-        plt.ylabel('Model accuracy (R²)')
-        plt.title('Latency vs Accuracy')
-        plt.tight_layout()
-        plt.savefig(benchmark_dir / 'latency_vs_accuracy.png', dpi=160)
-        plt.close()
-
-        plt.figure(figsize=(8, 5))
-        plt.scatter(
-            experiment_df['peak_memory_mb'],
-            experiment_df['model_accuracy_r2'],
-            c=experiment_df['memory_limit_mb'],
-            cmap='plasma',
-        )
-        plt.colorbar(label='Memory limit (MB)')
-        plt.xlabel('Peak memory (MB)')
-        plt.ylabel('Model accuracy (R²)')
-        plt.title('Memory vs Accuracy')
-        plt.tight_layout()
-        plt.savefig(benchmark_dir / 'memory_vs_accuracy.png', dpi=160)
-        plt.close()
-
-        plt.figure(figsize=(8, 5))
-        plt.scatter(
-            experiment_df['peak_memory_mb'],
-            experiment_df['preprocessing_latency_s'],
-            c=experiment_df['model_accuracy_r2'],
-            cmap='coolwarm',
-        )
-        plt.colorbar(label='Model accuracy (R²)')
-        plt.xlabel('Peak memory (MB)')
-        plt.ylabel('Latency (s)')
-        plt.title('Latency vs Memory vs Accuracy')
-        plt.tight_layout()
-        plt.savefig(benchmark_dir / 'latency_memory_accuracy.png', dpi=160)
-        plt.close()
 
 
 # Backward-compatible alias

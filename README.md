@@ -1,4 +1,4 @@
-# NBA Data Preprocessing
+# nba_data_preprocessing
 
 Deterministic data preprocessing and feature-engineering pipeline for NBA salary modeling experiments under reproducible and resource-constrained execution settings.
 
@@ -36,16 +36,16 @@ The pipeline is organized as modular stages:
 Architecture diagram source: `docs/architecture.mmd`.
 
 ## Repository Structure
-- `NBA Data Preprocessing/task/`  
+- `nba_data_preprocessing/task/`  
   Core pipeline entry points (`run_pipeline.py`, `preprocess.py`) and modular pipeline components.
 
-- `NBA Data Preprocessing/task/pipeline/`  
+- `nba_data_preprocessing/task/pipeline/`  
   Configuration, reproducibility, and pipeline-stage implementation modules.
 
-- `NBA Data Preprocessing/task/test/`  
+- `nba_data_preprocessing/task/test/`  
   Unit tests for modular pipeline behavior and regression checks.
 
-- `NBA Data Preprocessing/data/`  
+- `nba_data_preprocessing/data/`  
   Input NBA datasets (full and cleaned CSV variants) used by the workflow.
 
 - `configs/`  
@@ -63,19 +63,22 @@ Architecture diagram source: `docs/architecture.mmd`.
 - Batch and constrained processing modes for resource-aware experimentation.
 - Built-in reporting, benchmark outputs, and operator-level profiling artifacts.
 - CLI-driven pipeline orchestration for repeatable and scriptable runs.
+- Plot generation is optional; install `requirements-plot.txt` to enable benchmark image outputs (e.g., `latency_vs_accuracy.png`).
 
 ## Installation
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+# Optional plotting/report visuals (benchmark PNGs)
+pip install -r requirements-plot.txt
 ```
 
 ## Usage
 Run the end-to-end pipeline with a configuration template:
 
 ```bash
-cd "NBA Data Preprocessing/task"
+cd "nba_data_preprocessing/task"
 python run_pipeline.py \
   --input ../data/nba2k-full.csv \
   --config-template ../../configs/pipeline.edge.template.json
@@ -84,7 +87,7 @@ python run_pipeline.py \
 Run preprocessing directly:
 
 ```bash
-cd "NBA Data Preprocessing/task"
+cd "nba_data_preprocessing/task"
 python preprocess.py --input ../data/nba2k-full.csv
 ```
 
@@ -99,7 +102,7 @@ Experiments can be reproduced by combining fixed configuration templates with de
 Example validation command:
 
 ```bash
-cd "NBA Data Preprocessing/task"
+cd "nba_data_preprocessing/task"
 python -m unittest discover -s test -p 'test_*.py'
 ```
 

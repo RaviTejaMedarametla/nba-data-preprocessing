@@ -1,10 +1,16 @@
 import json
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
+import pandas as pd
+from pandas.errors import EmptyDataError
+
 from pipeline.config import PipelineConfig
+from pipeline.hardware.monitor import HardwareMonitor, TelemetrySnapshot
 from pipeline.streaming import PipelineRunner
+from pipeline.validation import DataValidator
 from preprocess import clean_data, feature_data, multicol_data, transform_data
 
 
@@ -62,6 +68,72 @@ class PipelineRegressionTests(unittest.TestCase):
         json_a = json.loads((dir_a / 'reports' / 'pipeline_report.json').read_text(encoding='utf-8'))
         json_b = json.loads((dir_b / 'reports' / 'pipeline_report.json').read_text(encoding='utf-8'))
         self.assertEqual(json_a['dataset_fingerprint'], json_b['dataset_fingerprint'])
+
+    def test_schema_validation_negative_paths(self):
+        validator = DataValidator()
+        malformed = pd.DataFrame({'salary': ['abc', 'oops'], 'b_day': ['01/01/90', '02/02/90']})
+        ok, issues = validator.schema_validation(malformed, required_columns=['version', 'salary', 'b_day', 'draft_year'])
+        self.assertFalse(ok)
+        self.assertTrue(any('missing_columns' in issue for issue in issues))
+        self.assertIn('salary_column_not_numeric', issues)
+
+    def test_extreme_missingness_is_handled(self):
+        missing_df = pd.DataFrame(
+            {
+                'version': ['NBA2K20', 'NBA2K20'],
+                'b_day': ['01/01/90', '02/02/90'],
+                'draft_year': ['2010', '2011'],
+                'team': [None, None],
+                'height': ['6-0 / 1.83', None],
+                'weight': ['200 lbs. / 90 kg.', None],
+                'salary': ['$1000000', None],
+                'country': ['USA', None],
+                'draft_round': [None, 'Undrafted'],
+            }
+        )
+        cleaned = clean_data(missing_df)
+        self.assertLess(cleaned.isna().sum().sum(), len(cleaned.columns))
+
+    def test_invalid_config_values_raise(self):
+        invalid_cases = [
+            {'chunk_size': 0},
+            {'chunk_size': -1},
+            {'batch_size': 0},
+            {'batch_size': -1},
+            {'max_memory_mb': 0},
+            {'max_memory_mb': -1},
+            {'max_compute_units': 0},
+            {'max_compute_units': -0.1},
+            {'benchmark_runs': 0},
+            {'benchmark_runs': -1},
+        ]
+        for kwargs in invalid_cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    PipelineConfig(**kwargs)
+
+    def test_unknown_config_keys_raise_type_error(self):
+        with self.assertRaises(TypeError):
+            PipelineConfig(**{'unknown_option': 123})
+
+    def test_hardware_monitor_fallback_without_psutil(self):
+        monitor = HardwareMonitor()
+        monitor._psutil = None
+        snap = monitor.snapshot()
+        self.assertEqual(snap.cpu_percent, 0.0)
+        telemetry = monitor.compare(
+            TelemetrySnapshot(cpu_percent=0.0, process_memory_mb=0.0, system_memory_percent=0.0, energy_uj=None),
+            snap,
+        )
+        self.assertIn('rapl_energy_j', telemetry)
+
+    def test_streaming_empty_or_corrupt_input(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            empty_csv = Path(tmpdir) / 'empty_input.csv'
+            empty_csv.write_text('', encoding='utf-8')
+            runner = PipelineRunner(PipelineConfig(output_dir=Path(tmpdir) / 'artifacts_empty', benchmark_runs=1))
+            with self.assertRaises(EmptyDataError):
+                runner.run_streaming(empty_csv)
 
 
 if __name__ == '__main__':

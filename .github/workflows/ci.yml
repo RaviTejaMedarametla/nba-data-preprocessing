@@ -30,17 +30,17 @@ jobs:
           pip install --requirement requirements.txt
 
       - name: Run unit tests
-        working-directory: NBA Data Preprocessing/task
+        working-directory: nba_data_preprocessing/task
         run: python -m unittest discover -s test -p 'test_*.py'
 
       - name: Generate deterministic artifacts
-        working-directory: NBA Data Preprocessing/task
+        working-directory: nba_data_preprocessing/task
         run: |
           python run_pipeline.py --input ../data/nba2k-full.csv --output-dir artifacts_ci --benchmark-runs 2 --random-seed 42 --spill-to-disk
           python run_pipeline.py --input ../data/nba2k-full.csv --output-dir artifacts_ci_2 --benchmark-runs 2 --random-seed 42 --spill-to-disk
 
       - name: Validate artifact schema and deterministic fingerprint
-        working-directory: NBA Data Preprocessing/task
+        working-directory: nba_data_preprocessing/task
         run: |
           python - <<'PY'
           import json
