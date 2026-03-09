@@ -14,8 +14,14 @@ After `run_all`, the pipeline writes:
 
 ## Reproducible Profiling Command
 
+Install optional plotting dependencies first if you want PNG benchmark charts:
+
 ```bash
-cd "NBA Data Preprocessing/task"
+pip install -r requirements-plot.txt
+```
+
+```bash
+cd "nba_data_preprocessing/task"
 python run_pipeline.py \
   --input ../data/nba2k-full.csv \
   --output-dir artifacts_profile \
